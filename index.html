@@ -1,54 +1,24 @@
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8" />
-  <title>UFO Sightings by US State</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <script src="https://cdn.jsdelivr.net/npm/vega@5"></script>
-  <script src="https://cdn.jsdelivr.net/npm/vega-lite@5"></script>
-  <script src="https://cdn.jsdelivr.net/npm/vega-embed@6"></script>
-  <style>
-    body{margin:0;font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
-    #vis{max-width:1100px;margin:28px auto;padding:0 16px;min-height:560px}
-    footer{max-width:1100px;margin:0 auto 28px;padding:0 16px;font-size:12px;color:#475569}
-  </style>
-</head>
-<body>
-<div id="vis"></div>
-<footer>Data: scrubbed.csv (US-only). Map: us-atlas states (TopoJSON). Metric: absolute sightings per state.</footer>
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
+  "width": 900,
+  "height": 560,
+  "title": {"text": "UFO Sightings by US State (Absolute Counts)", "anchor": "start"},
+  "projection": {"type": "albersUsa"},
 
-<script>
-const spec = {
-  $schema: "https://vega.github.io/schema/vega-lite/v5.json",
-  width: 980,
-  height: 560,
-  title: {
-    text: "UFO Sightings by US State (Absolute Counts)",
-    subtitle: "Albers USA projection · postal→FIPS join · hover for exact values",
-    anchor: "start"
-  },
-  projection: { type: "albersUsa" },
+  "data": { "url": "https://gfor009.github.io/FIT3179/scrubbed.csv" },
 
-  data: { url: "scrubbed.csv" },
+  "transform": [
+    { "calculate": "upper(trim(datum.state ? datum.state : (datum.State ? datum.State : (datum.us_state ? datum.us_state : ''))))", "as": "st" },
+    { "filter": "length(datum.st)==2" },
 
-  transform: [
-    // pick a state code from multiple possible column names, then clean it
+    { "aggregate": [{"op": "count", "as": "sightings"}], "groupby": ["st"] },
+
+    /* postal -> numeric FIPS */
     {
-      calculate:
-        "upper(trim(datum.state ? datum.state : (datum.State ? datum.State : (datum.us_state ? datum.us_state : ''))))",
-      as: "st"
-    },
-    { filter: "length(datum.st)==2" },
-
-    // count sightings per state postal code
-    { aggregate: [{ op: "count", as: "sightings" }], groupby: ["st"] },
-
-    // postal -> numeric FIPS (needed to join to us-atlas TopoJSON)
-    {
-      lookup: "st",
-      from: {
-        data: {
-          values: [
+      "lookup": "st",
+      "from": {
+        "data": {
+          "values": [
             {"st":"AL","fips":1},{"st":"AK","fips":2},{"st":"AZ","fips":4},{"st":"AR","fips":5},{"st":"CA","fips":6},
             {"st":"CO","fips":8},{"st":"CT","fips":9},{"st":"DE","fips":10},{"st":"DC","fips":11},{"st":"FL","fips":12},
             {"st":"GA","fips":13},{"st":"HI","fips":15},{"st":"ID","fips":16},{"st":"IL","fips":17},{"st":"IN","fips":18},
@@ -62,68 +32,58 @@ const spec = {
             {"st":"WY","fips":56},{"st":"PR","fips":72}
           ]
         },
-        key: "st",
-        fields: ["fips"]
+        "key": "st",
+        "fields": ["fips"]
       },
-      as: ["fips"]
+      "as": ["fips"]
+    },
+
+    /* make a 2-digit string FIPS to match TopoJSON id ("01","02",...) */
+    { "calculate": "datum.fips < 10 ? '0' + datum.fips : toString(datum.fips)", "as": "fips_id" },
+
+    /* bring in the state geometry + name from us-atlas */
+    {
+      "lookup": "fips_id",
+      "from": {
+        "data": {
+          "url": "https://cdn.jsdelivr.net/npm/us-atlas@3/states-10m.json",
+          "format": { "type": "topojson", "feature": "states" }
+        },
+        "key": "id",
+        "fields": ["geometry", "properties.name"]
+      },
+      "as": ["geom", "state_name"]
     }
   ],
 
-  layer: [
-    // 1) base US states so empty states still show
+  "layer": [
+    /* base US so empty states still show */
     {
-      data: {
-        url: "https://cdn.jsdelivr.net/npm/us-atlas@3/states-10m.json",
-        format: { type: "topojson", feature: "states" }
+      "data": {
+        "url": "https://cdn.jsdelivr.net/npm/us-atlas@3/states-10m.json",
+        "format": { "type": "topojson", "feature": "states" }
       },
-      mark: { type: "geoshape", fill: "#f4f6f8", stroke: "#e1e6ee" }
+      "mark": { "type": "geoshape", "fill": "#f4f6f8", "stroke": "#e1e6ee" }
     },
 
-    // 2) colored states (join by FIPS)
+    /* choropleth (only rows that matched geometry will color) */
     {
-      data: {
-        url: "https://cdn.jsdelivr.net/npm/us-atlas@3/states-10m.json",
-        format: { type: "topojson", feature: "states" }
-      },
-      transform: [
-        { calculate: "toNumber(datum.id)", as: "fips" },
-        {
-          lookup: "fips",
-          from: { data: { name: "source_0" }, key: "fips", fields: ["st", "sightings"] }
+      "transform": [{ "filter": "isValid(datum.geom)" }],
+      "mark": { "type": "geoshape" },
+      "encoding": {
+        "shape": { "field": "geom", "type": "geojson" },
+        "color": {
+          "field": "sightings",
+          "type": "quantitative",
+          "scale": { "scheme": "blues" },
+          "legend": { "title": "Sightings", "format": ",.0f" }
         },
-        // add state name from the same topojson for nicer tooltips
-        {
-          lookup: "fips",
-          from: {
-            data: {
-              url: "https://cdn.jsdelivr.net/npm/us-atlas@3/states-10m.json",
-              format: { type: "topojson", feature: "states" }
-            },
-            key: "id",
-            fields: ["properties.name"]
-          },
-          as: ["state_name"]
-        }
-      ],
-      mark: { type: "geoshape" },
-      encoding: {
-        color: {
-          field: "sightings",
-          type: "quantitative",
-          scale: { scheme: "blues" },
-          legend: { title: "Sightings", format: ",.0f" }
-        },
-        tooltip: [
-          { field: "state_name", title: "State" },
-          { field: "st", title: "Code" },
-          { field: "sightings", title: "Sightings", format: ",.0f" }
+        "tooltip": [
+          { "field": "state_name", "title": "State" },
+          { "field": "st", "title": "Code" },
+          { "field": "sightings", "title": "Sightings", "format": ",.0f" }
         ]
       }
     }
   ]
-};
-
-vegaEmbed("#vis", spec, { actions: false });
-</script>
-</body>
-</html>
+}
