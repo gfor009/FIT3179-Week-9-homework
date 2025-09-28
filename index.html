@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>UFO Sightings by US State</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <script src="https://cdn.jsdelivr.net/npm/vega@5"></script>
+  <script src="https://cdn.jsdelivr.net/npm/vega-lite@5"></script>
+  <script src="https://cdn.jsdelivr.net/npm/vega-embed@6"></script>
+  <style>
+    body{margin:0;font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
+    #vis{max-width:1100px;margin:28px auto;padding:0 16px;min-height:560px}
+    footer{max-width:1100px;margin:0 auto 28px;padding:0 16px;font-size:12px;color:#475569}
+  </style>
+</head>
+<body>
+<div id="vis"></div>
+<footer>Data: scrubbed.csv (US-only). Map: us-atlas states (TopoJSON). Metric: absolute sightings per state.</footer>
+
+<script>
+const spec = {
+  $schema: "https://vega.github.io/schema/vega-lite/v5.json",
+  width: 980,
+  height: 560,
+  title: {
+    text: "UFO Sightings by US State (Absolute Counts)",
+    subtitle: "Albers USA projection · postal→FIPS join · hover for exact values",
+    anchor: "start"
+  },
+  projection: { type: "albersUsa" },
+
+  data: { url: "scrubbed.csv" },
+
+  transform: [
+    // pick a state code from multiple possible column names, then clean it
+    {
+      calculate:
+        "upper(trim(datum.state ? datum.state : (datum.State ? datum.State : (datum.us_state ? datum.us_state : ''))))",
+      as: "st"
+    },
+    { filter: "length(datum.st)==2" },
+
+    // count sightings per state postal code
+    { aggregate: [{ op: "count", as: "sightings" }], groupby: ["st"] },
+
+    // postal -> numeric FIPS (needed to join to us-atlas TopoJSON)
+    {
+      lookup: "st",
+      from: {
+        data: {
+          values: [
+            {"st":"AL","fips":1},{"st":"AK","fips":2},{"st":"AZ","fips":4},{"st":"AR","fips":5},{"st":"CA","fips":6},
+            {"st":"CO","fips":8},{"st":"CT","fips":9},{"st":"DE","fips":10},{"st":"DC","fips":11},{"st":"FL","fips":12},
+            {"st":"GA","fips":13},{"st":"HI","fips":15},{"st":"ID","fips":16},{"st":"IL","fips":17},{"st":"IN","fips":18},
+            {"st":"IA","fips":19},{"st":"KS","fips":20},{"st":"KY","fips":21},{"st":"LA","fips":22},{"st":"ME","fips":23},
+            {"st":"MD","fips":24},{"st":"MA","fips":25},{"st":"MI","fips":26},{"st":"MN","fips":27},{"st":"MS","fips":28},
+            {"st":"MO","fips":29},{"st":"MT","fips":30},{"st":"NE","fips":31},{"st":"NV","fips":32},{"st":"NH","fips":33},
+            {"st":"NJ","fips":34},{"st":"NM","fips":35},{"st":"NY","fips":36},{"st":"NC","fips":37},{"st":"ND","fips":38},
+            {"st":"OH","fips":39},{"st":"OK","fips":40},{"st":"OR","fips":41},{"st":"PA","fips":42},{"st":"RI","fips":44},
+            {"st":"SC","fips":45},{"st":"SD","fips":46},{"st":"TN","fips":47},{"st":"TX","fips":48},{"st":"UT","fips":49},
+            {"st":"VT","fips":50},{"st":"VA","fips":51},{"st":"WA","fips":53},{"st":"WV","fips":54},{"st":"WI","fips":55},
+            {"st":"WY","fips":56},{"st":"PR","fips":72}
+          ]
+        },
+        key: "st",
+        fields: ["fips"]
+      },
+      as: ["fips"]
+    }
+  ],
+
+  layer: [
+    // 1) base US states so empty states still show
+    {
+      data: {
+        url: "https://cdn.jsdelivr.net/npm/us-atlas@3/states-10m.json",
+        format: { type: "topojson", feature: "states" }
+      },
+      mark: { type: "geoshape", fill: "#f4f6f8", stroke: "#e1e6ee" }
+    },
+
+    // 2) colored states (join by FIPS)
+    {
+      data: {
+        url: "https://cdn.jsdelivr.net/npm/us-atlas@3/states-10m.json",
+        format: { type: "topojson", feature: "states" }
+      },
+      transform: [
+        { calculate: "toNumber(datum.id)", as: "fips" },
+        {
+          lookup: "fips",
+          from: { data: { name: "source_0" }, key: "fips", fields: ["st", "sightings"] }
+        },
+        // add state name from the same topojson for nicer tooltips
+        {
+          lookup: "fips",
+          from: {
+            data: {
+              url: "https://cdn.jsdelivr.net/npm/us-atlas@3/states-10m.json",
+              format: { type: "topojson", feature: "states" }
+            },
+            key: "id",
+            fields: ["properties.name"]
+          },
+          as: ["state_name"]
+        }
+      ],
+      mark: { type: "geoshape" },
+      encoding: {
+        color: {
+          field: "sightings",
+          type: "quantitative",
+          scale: { scheme: "blues" },
+          legend: { title: "Sightings", format: ",.0f" }
+        },
+        tooltip: [
+          { field: "state_name", title: "State" },
+          { field: "st", title: "Code" },
+          { field: "sightings", title: "Sightings", format: ",.0f" }
+        ]
+      }
+    }
+  ]
+};
+
+vegaEmbed("#vis", spec, { actions: false });
+</script>
+</body>
+</html>
